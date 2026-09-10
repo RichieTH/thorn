@@ -1,0 +1,23 @@
+# Rust
+thorn-rs/target/
+
+# Go
+thorn-go/bin/
+thorn-go/vendor/
+
+# Bench output
+bench/*.log
+bench/*.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Local Claude memory (don't commit auto-memory)
+.claude/auto-memory/
+CLAUDE.local.md

@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  thorn-rs:
+    name: thorn-rs (lint + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: thorn-rs
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "thorn-rs -> target"
+
+      - name: cargo fmt --check
+        run: cargo fmt -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: cargo test
+        run: cargo test --locked
+
+      - name: cargo build --release
+        run: cargo build --release --locked
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: thorn-rs-binary
+          path: thorn-rs/target/release/thorn
+          retention-days: 1
+
+  thorn-go:
+    name: thorn-go (lint + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: thorn-go
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.22"
+          cache-dependency-path: thorn-go/go.sum
+
+      - name: gofmt check
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
+
+      - name: go build
+        run: go build -o bin/thorn ./cmd/thorn
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: thorn-go-binary
+          path: thorn-go/bin/thorn
+          retention-days: 1
+
+  cross-implementation-check:
+    name: cross-implementation agreement
+    needs: [thorn-rs, thorn-go]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            bench
+            fixtures
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: thorn-rs-binary
+          path: thorn-rs/target/release
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: thorn-go-binary
+          path: thorn-go/bin
+
+      - name: make binaries executable
+        run: |
+          chmod +x thorn-rs/target/release/thorn
+          chmod +x thorn-go/bin/thorn
+
+      - name: run bench/compare.sh
+        working-directory: bench
+        env:
+          RUNS: "3"
+        run: bash compare.sh
