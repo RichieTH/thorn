@@ -143,6 +143,10 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: generate checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS.txt
+
       - name: release
         uses: softprops/action-gh-release@v3
         with:

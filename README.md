@@ -25,6 +25,17 @@ Built in parallel in Rust (`thorn-rs`) and Go (`thorn-go`) to benchmark both imp
 ### Direct binary
 Download the archive for your platform from [GitHub Releases](https://github.com/RichieTH/thorn/releases/latest) — both `thorn-rs-*` and `thorn-go-*` builds are published for win/linux/mac (amd64 + arm64) on every tagged release, via the [release workflow](.github/workflows/release.yml).
 
+**Binaries aren't code-signed yet** (Windows/macOS may warn on first run) — verify what you downloaded against the published checksums instead:
+
+```bash
+# Every release includes a SHA256SUMS.txt alongside the binaries
+curl -LO https://github.com/RichieTH/thorn/releases/latest/download/SHA256SUMS.txt
+sha256sum -c SHA256SUMS.txt --ignore-missing   # Linux/macOS
+# or on Windows (PowerShell):
+#   Get-FileHash thorn-rs-x86_64-pc-windows-msvc.zip -Algorithm SHA256
+#   ...then compare by hand against the matching line in SHA256SUMS.txt
+```
+
 ### Go
 ```bash
 go install github.com/RichieTH/thorn/thorn-go/cmd/thorn@latest
