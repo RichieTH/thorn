@@ -86,3 +86,42 @@ func TestScanSeededSecretIsFound(t *testing.T) {
 		t.Error("expected SEC001 finding, got none")
 	}
 }
+
+func TestScanInlineThornIgnoreSuppressesTheFinding(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("AWS_ACCESS_KEY_ID = \"AKIAIOSFODNN7EXAMPLE\" # thorn-ignore\n")
+	if err := os.WriteFile(filepath.Join(dir, "creds.py"), content, 0o644); err != nil {
+		t.Fatalf("failed to write fixture file: %v", err)
+	}
+
+	findings, err := Scan(dir, rules.All())
+	if err != nil {
+		t.Fatalf("Scan returned error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected suppressed finding to be absent, got %d findings", len(findings))
+	}
+}
+
+func TestScanThornignoreFileSkipsMatchingFilesEntirely(t *testing.T) {
+	dir := t.TempDir()
+	ignoredDir := filepath.Join(dir, "ignored-dir")
+	if err := os.MkdirAll(ignoredDir, 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".thornignore"), []byte("ignored-dir\n"), 0o644); err != nil {
+		t.Fatalf("failed to write .thornignore: %v", err)
+	}
+	content := []byte("AWS_ACCESS_KEY_ID = \"AKIAIOSFODNN7EXAMPLE\"\n")
+	if err := os.WriteFile(filepath.Join(ignoredDir, "leaked.py"), content, 0o644); err != nil {
+		t.Fatalf("failed to write fixture file: %v", err)
+	}
+
+	findings, err := Scan(dir, rules.All())
+	if err != nil {
+		t.Fatalf("Scan returned error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected ignored file to produce no findings, got %d", len(findings))
+	}
+}

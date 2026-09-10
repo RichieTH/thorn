@@ -11,6 +11,21 @@
   elevation prompt that never surfaces in a non-interactive shell — if an install
   hangs far longer than it should, check for an orphaned `msiexec`/installer
   process before assuming it's just slow.
+- **Windows Smart App Control** can block execution of freshly-compiled, unsigned
+  test/integration binaries — you'll see `Os { code: 4551, ... "An Application
+  Control policy has blocked this file." }` from `cargo test` or `go test`. This
+  is a machine-level security feature, not a code bug (confirmed via the
+  `Microsoft-Windows-CodeIntegrity/Operational` event log — Code Integrity event
+  ID 3077/3089/3118 names the exact blocked binary). It's a one-way toggle on
+  consumer Windows — don't disable it. It tends to hit crypto-touching binaries
+  (e.g. `internal/license`'s tests) and subprocess-spawning integration tests
+  (anything shelling out to the built `thorn` binary) more than plain unit tests,
+  and its blocking is inconsistent run-to-run — the same binary can pass once and
+  then get blocked on an identical rebuild. If it's blocking you locally: unit
+  tests that don't spawn a second binary are usually unaffected and are your best
+  local signal; treat CI (GitHub Actions Linux runners, unaffected by this) as the
+  authoritative verification for anything that needs to actually execute a built
+  binary.
 
 ## Build & test — Rust
 
@@ -53,6 +68,37 @@ gofmt -l .                   # must print nothing (gofmt -w . to fix)
   `thorn/`, unlike Cargo's crate-root-relative integration tests. Getting this
   wrong silently makes every fixture-expectation assertion fail with "found
   nothing," which looks like a scanner bug but isn't — check the path first.
+- `thorn-go/cmd/thorn/main_test.go` is a genuine subprocess-integration test (like
+  Rust's `tests/integration.rs`) — it compiles the actual `thorn` binary via `go
+  build` and execs it, because the CLI's exit-code logic (`--fail-on-findings`)
+  calls `os.Exit()` directly, which would kill the test process itself if called
+  in-process. This is why it lives in `cmd/thorn/` rather than being a pure unit
+  test — `run()` isn't safely callable from a test.
+
+## Suppression testing
+
+[`testdata/suppression/`](../testdata/suppression/) is a **separate** fixture
+tree from `fixtures/` — deliberately, so suppression examples don't perturb the
+20-finding baseline count that `fixtures/`'s integration tests and
+`bench/compare.sh`'s cross-implementation check both assert on. If you add a new
+suppression mechanism or edge case, add its fixture under `testdata/suppression/`,
+not `fixtures/`.
+
+## Testing license-gated features
+
+`internal/license` / `src/license.rs` ship a **test keypair** in their own test
+code (`SigningKey::from_bytes(&[7u8; 32])` in Rust,
+`ed25519.NewKeyFromSeed([...]byte{7,7,...})` in Go) — this is not, and must never
+become, the real signing key. The real private key lives outside the repo (see
+`thorn-private-notes/thorn-license-signing-key.txt` if you have access to it) and
+is never used in test code, since committing it would let anyone mint their own
+valid license key. Tests that need "a validly-signed key" sign with the test key
+and assert `is_valid`/`IsValid` correctly *rejects* it (since `is_valid` only ever
+trusts the real embedded public key) — this proves the verification logic
+actually checks signatures rather than just parsing shape. The CLI-level
+integration tests (`main_test.go`, `tests/integration.rs`) cover the "no key" /
+"invalid key" paths only, for the same reason — they can't mint a key the real
+binary would accept.
 
 ## Benchmark / cross-implementation check
 

@@ -120,3 +120,119 @@ fn fixtures_directory_exists() {
         "expected shared fixtures/ dir at repo root"
     );
 }
+
+#[test]
+fn sarif_output_is_well_formed() {
+    let output = Command::new(env!("CARGO_BIN_EXE_thorn"))
+        .arg("--sarif")
+        .arg("../fixtures")
+        .output()
+        .expect("failed to run thorn binary");
+    assert!(output.status.success());
+
+    let report: Value =
+        serde_json::from_slice(&output.stdout).expect("thorn produced invalid SARIF JSON");
+    assert_eq!(report["version"], "2.1.0");
+    assert!(!report["runs"][0]["results"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn json_and_sarif_together_is_a_usage_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_thorn"))
+        .arg("--json")
+        .arg("--sarif")
+        .arg("../fixtures")
+        .output()
+        .expect("failed to run thorn binary");
+    assert!(!output.status.success());
+}
+
+#[test]
+fn suppression_testdata_exists() {
+    assert!(
+        Path::new("../testdata/suppression").is_dir(),
+        "expected ../testdata/suppression fixture dir"
+    );
+}
+
+#[test]
+fn thornignore_and_inline_suppression_actually_suppress() {
+    let report = run_thorn("../testdata/suppression");
+    let findings = report["findings"].as_array().unwrap();
+
+    // inline.py: bare thorn-ignore suppresses one key, the other (unsuppressed) is reported.
+    let inline_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| {
+            f["file"]
+                .as_str()
+                .unwrap()
+                .replace('\\', "/")
+                .ends_with("inline.py")
+        })
+        .collect();
+    assert_eq!(
+        inline_findings.len(),
+        1,
+        "expected exactly one unsuppressed finding in inline.py"
+    );
+
+    // rule-specific.py: thorn-ignore:SEC001 suppresses only SEC001, CFG003 (localhost) still reported.
+    let rule_specific_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| {
+            f["file"]
+                .as_str()
+                .unwrap()
+                .replace('\\', "/")
+                .ends_with("rule-specific.py")
+        })
+        .collect();
+    assert_eq!(rule_specific_findings.len(), 1);
+    assert_eq!(rule_specific_findings[0]["rule_id"], "CFG003");
+
+    // .thornignore skips ignored-dir/ entirely -- its leaked secret must never appear.
+    assert!(findings.iter().all(|f| !f["file"]
+        .as_str()
+        .unwrap()
+        .replace('\\', "/")
+        .contains("ignored-dir")));
+}
+
+#[test]
+fn fail_on_findings_without_key_exits_2_with_message() {
+    let output = Command::new(env!("CARGO_BIN_EXE_thorn"))
+        .arg("--fail-on-findings")
+        .arg("../fixtures")
+        .output()
+        .expect("failed to run thorn binary");
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("license key"), "stderr was: {stderr}");
+}
+
+#[test]
+fn fail_on_findings_with_invalid_key_exits_2_with_message() {
+    let output = Command::new(env!("CARGO_BIN_EXE_thorn"))
+        .arg("--fail-on-findings")
+        .arg("--license-key")
+        .arg("not-a-valid-key")
+        .arg("../fixtures")
+        .output()
+        .expect("failed to run thorn binary");
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("license key"), "stderr was: {stderr}");
+}
+
+#[test]
+fn without_fail_on_findings_exits_0_regardless_of_findings() {
+    let output = Command::new(env!("CARGO_BIN_EXE_thorn"))
+        .arg("--json")
+        .arg("../fixtures")
+        .output()
+        .expect("failed to run thorn binary");
+    assert!(output.status.success());
+}

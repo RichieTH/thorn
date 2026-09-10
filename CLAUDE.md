@@ -117,6 +117,23 @@ thorn/
 - License key validation is offline (hash check, no network call)
 - Sold via Lemon Squeezy
 
+**v0.2 implementation note**: the "CI mode (exit code 1 on findings)" gate is now
+built — see `--fail-on-findings` in README's Usage section and
+`thorn-rs/src/license.rs` / `thorn-go/internal/license/license.go`. It gates
+*only* that exit-code behavior, not JSON output or the rule set — both remain
+free/unconditional as already shipped in v0.1. Full rule-tier gating is still
+undecided/unbuilt.
+
+License validation could not actually be a plain "hash check" as originally
+written above: thorn's source is public, so any shared secret used for hashing
+would be readable in the repo, letting anyone mint their own valid key. It's
+implemented instead as offline Ed25519 signature verification — the public
+verification key is safely embedded in the public source; the private signing
+key (used to mint real keys) lives outside the repo entirely, along with a
+key-generation script, in a location documented in `docs/development.md`.
+Lemon Squeezy integration (actually selling/issuing keys) is still unbuilt — this
+only covers verifying a key that already exists.
+
 ## Current Status
 
 - [x] thorn-rs v0.1 implementation
@@ -128,3 +145,13 @@ thorn/
 - [x] GitHub Actions CI (lint + test on push)
 - [x] GitHub Release workflow (build binaries)
 - [x] README with install instructions (demo gif still outstanding — needs an actual terminal recording, deferred; a static example-output block stands in for now)
+
+### v0.2 (in progress)
+
+- [x] Suppression: inline `thorn-ignore` comments + `.thornignore` file
+- [x] SARIF output (`--sarif`)
+- [x] License-gated `--fail-on-findings` (Ed25519 signature verification)
+- [ ] Git history scanning — explicitly descoped from v0.2, needs its own round
+      (shells out to system `git` or adds a git library in each language — either
+      is a real departure from "single static binary, no runtime dependencies"
+      and deserves dedicated planning, not a bolt-on)
