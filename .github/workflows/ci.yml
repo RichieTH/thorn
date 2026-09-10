@@ -12,6 +12,20 @@ jobs:
     defaults:
       run:
         working-directory: thorn-rs
+    # Forces curve25519-dalek's portable (non-SIMD) backend, which avoids
+    # depending on curve25519-dalek-derive (a proc-macro crate, pulled in
+    # transitively via ed25519-dalek) entirely. Found while release-building
+    # locally on Windows: the build failed with "can't find crate for
+    # curve25519_dalek_derive" plus cascading unresolved-import errors --
+    # almost certainly this machine's Smart App Control blocking the
+    # proc-macro's compiled binary from loading (the same pattern documented
+    # in docs/development.md for test/build-script binaries all session), not
+    # a genuine curve25519-dalek bug. Kept here anyway: it's a strictly smaller
+    # dependency footprint with no measurable cost (Ed25519 verification is a
+    # rare, non-hot-path check), so there's no reason to carry the risk even
+    # though CI itself was never actually confirmed to hit this.
+    env:
+      RUSTFLAGS: --cfg curve25519_dalek_backend="serial"
     steps:
       - uses: actions/checkout@v7
 
@@ -52,7 +66,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.22"
+          go-version: "1.25"
           cache-dependency-path: thorn-go/go.sum
 
       - name: gofmt check

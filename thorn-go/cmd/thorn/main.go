@@ -3,14 +3,18 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/spf13/cobra"
 
 	"github.com/RichieTH/thorn/thorn-go/internal/license"
 	"github.com/RichieTH/thorn/thorn-go/internal/output"
+	"github.com/RichieTH/thorn/thorn-go/internal/releaseverify"
 	"github.com/RichieTH/thorn/thorn-go/internal/rules"
 	"github.com/RichieTH/thorn/thorn-go/internal/scanner"
 )
@@ -21,6 +25,9 @@ var (
 	minSeverityFlag string
 	failOnFindings  bool
 	licenseKeyFlag  string
+
+	verifyChecksumsFlag string
+	verifySignatureFlag string
 )
 
 func main() {
@@ -37,6 +44,22 @@ func main() {
 	rootCmd.Flags().BoolVar(&failOnFindings, "fail-on-findings", false, "exit with code 1 if any findings remain after filtering (paid feature — requires --license-key or THORN_LICENSE_KEY)")
 	rootCmd.Flags().StringVar(&licenseKeyFlag, "license-key", "", "license key unlocking --fail-on-findings (falls back to THORN_LICENSE_KEY)")
 	rootCmd.MarkFlagsMutuallyExclusive("json", "sarif")
+
+	verifyReleaseCmd := &cobra.Command{
+		Use:   "verify-release <file>",
+		Short: "Verify a downloaded release file against thorn's dual-signed checksums.txt",
+		Long: "Verify a downloaded release file against thorn's dual-signed checksums.txt " +
+			"(ML-DSA-65 / post-quantum signature, verified natively; the GPG signature on " +
+			"checksums.txt is verified separately via `gpg --verify`)",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE:         runVerifyRelease,
+	}
+	verifyReleaseCmd.Flags().StringVar(&verifyChecksumsFlag, "checksums", "", "path to the downloaded checksums.txt")
+	verifyReleaseCmd.Flags().StringVar(&verifySignatureFlag, "signature", "", "path to the downloaded checksums.txt.dilithium signature")
+	_ = verifyReleaseCmd.MarkFlagRequired("checksums")
+	_ = verifyReleaseCmd.MarkFlagRequired("signature")
+	rootCmd.AddCommand(verifyReleaseCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "thorn: %v\n", err)
@@ -101,6 +124,53 @@ func run(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 	return nil
+}
+
+func runVerifyRelease(cmd *cobra.Command, args []string) error {
+	file := args[0]
+
+	checksumsBytes, err := os.ReadFile(verifyChecksumsFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "thorn: could not read %s: %v\n", verifyChecksumsFlag, err)
+		os.Exit(2)
+	}
+	signatureBytes, err := os.ReadFile(verifySignatureFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "thorn: could not read %s: %v\n", verifySignatureFlag, err)
+		os.Exit(2)
+	}
+
+	if !releaseverify.VerifySignature(checksumsBytes, signatureBytes) {
+		fmt.Fprintln(os.Stderr, "thorn: checksums.txt signature is invalid — refusing to trust it")
+		os.Exit(1)
+	}
+
+	filename := filepath.Base(file)
+	expectedHash, found := releaseverify.FindChecksum(string(checksumsBytes), filename)
+	if !found {
+		fmt.Fprintf(os.Stderr, "thorn: %s is not listed in the (signature-verified) checksums.txt\n", filename)
+		os.Exit(1)
+	}
+
+	fileBytes, err := os.ReadFile(file)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "thorn: could not read %s: %v\n", file, err)
+		os.Exit(2)
+	}
+	actualHash := sha256Hex(fileBytes)
+
+	if actualHash != expectedHash {
+		fmt.Fprintf(os.Stderr, "thorn: checksum mismatch for %s — this file does not match the signed release\n", filename)
+		os.Exit(1)
+	}
+
+	fmt.Printf("thorn: %s verified — checksum matches and checksums.txt signature is valid\n", filename)
+	return nil
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func filterMinSeverity(findings []rules.Finding, min rules.Severity) []rules.Finding {

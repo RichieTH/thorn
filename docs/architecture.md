@@ -248,6 +248,55 @@ Three new pieces, each self-contained enough to reason about independently:
   repo entirely. See [development.md](./development.md#testing-license-gated-features)
   for how this is tested without the real key ever touching test code.
 
+## Dual-signed release checksums + `thorn verify-release`
+
+Every tagged release publishes a `checksums.txt` (SHA-256 of every binary
+archive), signed **twice**, for two different reasons:
+
+- **GPG** (`checksums.txt.asc`) — the classical signature. Verifiable with `gpg
+  --verify`, a tool most developers already have installed. This is the practical
+  "can I trust this download" check for almost everyone.
+- **ML-DSA-65 / Dilithium** (`checksums.txt.dilithium`) — the post-quantum
+  signature. Verifiable natively by `thorn verify-release` itself, with zero
+  extra tooling — but almost nothing else in the wild can check an ML-DSA
+  signature yet, so this is the forward-looking half, not (yet) the practical
+  one for most users.
+
+**Why not a plain hash check**, which is what CLAUDE.md originally specified for
+the license system and which this design deliberately departs from too: thorn's
+source is public. Any shared secret baked into the source for a symmetric hash
+check would be readable by anyone, who could then forge their own "valid"
+checksums file. Both signature schemes here are asymmetric — only the *public*
+verification key needs to be public (safely embedded in source, or published
+outright for GPG), while the private signing key that actually produces valid
+signatures never touches the repo.
+
+**Where things live**, mirroring the license-key pattern exactly:
+- `thorn-rs/src/verify_release.rs` / `thorn-go/internal/releaseverify/releaseverify.go`
+  — the embedded ML-DSA-65 public key and verification logic, shipped in every
+  scan binary (this is a real compiled dependency in both languages now: `ml-dsa`
+  in Rust, `cloudflare/circl` in Go — the latter bumped Go's minimum version to
+  1.25). GPG verification is deliberately **not** replicated here — embedding a
+  full OpenPGP parser (`sequoia-openpgp` / `go-crypto`) would be a much heavier
+  dependency than a scanner binary otherwise needs, for a use case `gpg --verify`
+  already covers.
+- `thorn-rs/examples/sign_checksums.rs` — the CI-only signing helper (`cargo run
+  --example sign_checksums`), reading the real private key from an environment
+  variable. Not part of the shipped scanner binaries.
+- Both private keys (GPG and ML-DSA) live in `thorn-private-notes/` (outside the
+  repo, gitignored) and as GitHub Actions secrets (`RELEASE_GPG_PRIVATE_KEY`,
+  `RELEASE_DILITHIUM_PRIVATE_KEY`) so `release.yml` can sign automatically on
+  every tag push. The GPG public key is published at
+  [`docs/thorn-release-signing-pubkey.asc`](./thorn-release-signing-pubkey.asc).
+
+`thorn verify-release <file> --checksums checksums.txt --signature
+checksums.txt.dilithium` is a `clap`/`cobra` subcommand added via
+`args_conflicts_with_subcommands` (Rust) / `rootCmd.AddCommand` (Go) — both
+patterns preserve the existing `thorn <path> [flags]` scan invocation completely
+unchanged when no subcommand is given. Its own exit codes mirror the
+license-gating convention: 1 for "verification failed" (bad signature, checksum
+mismatch, file not listed), 2 for usage errors (files not found).
+
 ## Why two implementations at all
 
 Per CLAUDE.md: built in parallel specifically to benchmark Rust vs. Go for this

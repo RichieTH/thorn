@@ -151,6 +151,10 @@ only covers verifying a key that already exists.
 - [x] Suppression: inline `thorn-ignore` comments + `.thornignore` file
 - [x] SARIF output (`--sarif`)
 - [x] License-gated `--fail-on-findings` (Ed25519 signature verification)
+- [x] Dual-signed release `checksums.txt` (GPG + ML-DSA-65/Dilithium) and
+      `thorn verify-release` — see docs/architecture.md. Code-signing the
+      binaries themselves (Windows Trusted Signing, macOS notarization) is
+      still on hold pending paid Azure/Apple developer accounts.
 - [ ] Git history scanning — explicitly descoped from v0.2, needs its own round
       (shells out to system `git` or adds a git library in each language — either
       is a real departure from "single static binary, no runtime dependencies"

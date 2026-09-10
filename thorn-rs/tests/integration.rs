@@ -236,3 +236,80 @@ fn without_fail_on_findings_exits_0_regardless_of_findings() {
         .expect("failed to run thorn binary");
     assert!(output.status.success());
 }
+
+// verify-release: the real signing private key lives outside this repo
+// (thorn-private-notes/, never committed and not available in CI test context),
+// so these test the CLI wiring against non-privileged paths only. The full
+// sign/verify round-trip against the real embedded public key is covered at the
+// unit level in src/verify_release.rs (via an explicit test keypair, bypassing
+// the embedded key) and was manually verified end-to-end with the real key
+// during development -- see docs/development.md.
+
+#[test]
+fn verify_release_with_malformed_signature_exits_1() {
+    let dir = std::env::temp_dir().join(format!("thorn-verify-release-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let target_file = dir.join("downloaded.tar.gz");
+    std::fs::write(&target_file, b"anything").unwrap();
+    let checksums = dir.join("checksums.txt");
+    std::fs::write(&checksums, "abc  downloaded.tar.gz\n").unwrap();
+    let signature = dir.join("checksums.txt.dilithium");
+    std::fs::write(&signature, b"not-a-real-signature").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_thorn"))
+        .arg("verify-release")
+        .arg(&target_file)
+        .arg("--checksums")
+        .arg(&checksums)
+        .arg("--signature")
+        .arg(&signature)
+        .output()
+        .expect("failed to run thorn binary");
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("signature is invalid"),
+        "stderr was: {stderr}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn verify_release_with_missing_checksums_file_exits_2() {
+    let dir = std::env::temp_dir().join(format!(
+        "thorn-verify-release-missing-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let target_file = dir.join("downloaded.tar.gz");
+    std::fs::write(&target_file, b"anything").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_thorn"))
+        .arg("verify-release")
+        .arg(&target_file)
+        .arg("--checksums")
+        .arg(dir.join("does-not-exist.txt"))
+        .arg("--signature")
+        .arg(dir.join("does-not-exist.dilithium"))
+        .output()
+        .expect("failed to run thorn binary");
+
+    assert_eq!(output.status.code(), Some(2));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn verify_release_does_not_disturb_default_scan_behavior() {
+    // Sanity check that adding the subcommand didn't break the no-subcommand path.
+    let output = Command::new(env!("CARGO_BIN_EXE_thorn"))
+        .arg("--json")
+        .arg("../fixtures")
+        .output()
+        .expect("failed to run thorn binary");
+    assert!(output.status.success());
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report["summary"]["total"].as_u64().unwrap() > 0);
+}
