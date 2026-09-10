@@ -21,3 +21,6 @@ Thumbs.db
 # Local Claude memory (don't commit auto-memory)
 .claude/auto-memory/
 CLAUDE.local.md
+
+# Private planning/roadmap notes -- never meant to be pushed
+thorn-private-notes/
