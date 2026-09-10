@@ -62,9 +62,27 @@ thorn /path/to/repo
 # JSON output (for CI pipelines)
 thorn --json .
 
+# SARIF output (for GitHub code scanning -- upload with github/codeql-action/upload-sarif)
+thorn --sarif . > results.sarif
+
 # Specific severity threshold
 thorn --min-severity HIGH .
+
+# Fail the build on findings (paid feature -- requires a license key)
+thorn --fail-on-findings --license-key <KEY> .
+# or: THORN_LICENSE_KEY=<KEY> thorn --fail-on-findings .
 ```
+
+### Suppressing findings
+
+No flag needed -- both mechanisms are always honored:
+
+- **Inline**: add `# thorn-ignore` (or the language's comment syntax) anywhere on
+  the offending line to suppress every finding on it, or `# thorn-ignore:SEC001`
+  to suppress only that rule.
+- **`.thornignore`**: a gitignore-style file at the scan root. One pattern per
+  line (`#` comments, blank lines skipped) -- a matching file or directory is
+  skipped entirely, no rule ever sees its content.
 
 ---
 

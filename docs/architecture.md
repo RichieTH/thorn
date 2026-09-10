@@ -212,6 +212,42 @@ both strip `\r\n` and `\n` consistently — this was verified, not assumed, sinc
 divergence here would silently break Windows-authored fixture files (`\r\n` line
 endings) differently between the two implementations.
 
+## v0.2 additions: suppression, SARIF, license gating
+
+Three new pieces, each self-contained enough to reason about independently:
+
+- **Suppression** hooks into the existing pipeline at two points, not a new
+  module of its own conceptually: `scanner::scan`/`Scan` now loads
+  `.thornignore` from the scan root once (gitignore-style patterns, hand-rolled
+  glob-to-regex matching — no new dependency in either language) and filters the
+  walker's output before any rule ever sees a matching file; then, after each
+  rule runs, `suppress::is_suppressed`/`isSuppressed` re-reads the matched line
+  and drops the finding if it carries an inline `thorn-ignore` marker. Both
+  checks are pure functions over `content`/`line`/`rule_id` — no state, easy to
+  unit test in isolation from the walking/rule machinery. See
+  `thorn-rs/src/scanner/suppress.rs` / `thorn-go/internal/scanner/suppress.go`.
+  Its fixtures live in a separate `testdata/suppression/` tree, not `fixtures/`
+  — see [development.md](./development.md#suppression-testing) for why.
+
+- **SARIF output** (`output/sarif.rs` / `output/sarif.go`) is structurally a
+  sibling of `output/json.rs` / `output/json.go` — same `render(target,
+  findings) -> String` shape, different schema. The one thing to preserve if you
+  touch it: SARIF's `message.text` must stay the rule name, never matched
+  content — this is the one output format where it'd be easy to accidentally
+  paste something more "detailed" in and quietly break the
+  security-hardened-output guarantee described below.
+
+- **License gating** (`license.rs` / `internal/license/license.go`) is
+  deliberately narrow: a single `is_valid(key) -> bool` / `IsValid(key) bool`
+  function, called from `main`/`main.go` only to decide whether
+  `--fail-on-findings` is allowed to actually exit 1. It doesn't touch rules,
+  scanning, or any other output format — v0.1's free, unconditional behavior is
+  completely unchanged. The verification key embedded in source is a *public*
+  Ed25519 key (safe to be public, even though this repo is open source) — the
+  private key that mints real customer keys is deliberately kept outside the
+  repo entirely. See [development.md](./development.md#testing-license-gated-features)
+  for how this is tested without the real key ever touching test code.
+
 ## Why two implementations at all
 
 Per CLAUDE.md: built in parallel specifically to benchmark Rust vs. Go for this

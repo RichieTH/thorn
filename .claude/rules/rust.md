@@ -14,6 +14,12 @@ Applies to: `thorn-rs/**`
 - `serde` + `serde_json` — JSON output
 - `colored` — terminal color output
 - `chrono` — timestamps in output
+- `ed25519-dalek` — offline license-key signature verification (v0.2). Necessary
+  because thorn's source is public: a plain shared-secret hash check (as
+  originally noted in CLAUDE.md) can't actually be secure in an open-source repo
+  — asymmetric signing is the only offline mechanism where the public
+  verification key can safely live in public source. See `src/license.rs`.
+- `base64` — license key encoding (paired with the above)
 
 Do not add dependencies without a clear reason. Single binary, minimal footprint.
 
