@@ -33,6 +33,13 @@ jobs:
     defaults:
       run:
         working-directory: thorn-rs
+    # Forces curve25519-dalek's portable backend -- see the matching comment in
+    # ci.yml's thorn-rs job for the full explanation (short version: avoids a
+    # proc-macro dependency that failed to load during local release-build
+    # testing on Windows, most likely due to Smart App Control rather than a
+    # real bug -- kept regardless since it's a strictly smaller, free win).
+    env:
+      RUSTFLAGS: --cfg curve25519_dalek_backend="serial"
     steps:
       - uses: actions/checkout@v7
 
@@ -103,7 +110,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.22"
+          go-version: "1.25"
           cache-dependency-path: thorn-go/go.sum
 
       - name: go build
@@ -138,6 +145,14 @@ jobs:
     needs: [build-rust, build-go]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "thorn-rs -> target"
+
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -145,7 +160,34 @@ jobs:
 
       - name: generate checksums
         working-directory: dist
-        run: sha256sum * > SHA256SUMS.txt
+        run: sha256sum * > checksums.txt
+
+      - name: sign checksums (GPG)
+        working-directory: dist
+        run: |
+          echo "$RELEASE_GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --batch --local-user releases@thorn.dev --detach-sign --armor \
+            -o checksums.txt.asc checksums.txt
+        env:
+          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+
+      - name: sign checksums (ML-DSA / Dilithium)
+        working-directory: thorn-rs
+        run: |
+          cargo run --quiet --example sign_checksums \
+            < ../dist/checksums.txt \
+            > ../dist/checksums.txt.dilithium
+        env:
+          THORN_DILITHIUM_PRIVATE_KEY: ${{ secrets.RELEASE_DILITHIUM_PRIVATE_KEY }}
+
+      - name: verify signatures before publishing
+        run: |
+          cd dist
+          gpg --verify checksums.txt.asc checksums.txt
+          echo "GPG signature verified."
+          cargo run --quiet --manifest-path ../thorn-rs/Cargo.toml -- \
+            verify-release thorn-rs-x86_64-unknown-linux-gnu.tar.gz \
+            --checksums checksums.txt --signature checksums.txt.dilithium
 
       - name: release
         uses: softprops/action-gh-release@v3

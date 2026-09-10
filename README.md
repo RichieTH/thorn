@@ -25,16 +25,34 @@ Built in parallel in Rust (`thorn-rs`) and Go (`thorn-go`) to benchmark both imp
 ### Direct binary
 Download the archive for your platform from [GitHub Releases](https://github.com/RichieTH/thorn/releases/latest) — both `thorn-rs-*` and `thorn-go-*` builds are published for win/linux/mac (amd64 + arm64) on every tagged release, via the [release workflow](.github/workflows/release.yml).
 
-**Binaries aren't code-signed yet** (Windows/macOS may warn on first run) — verify what you downloaded against the published checksums instead:
+**Binaries aren't code-signed yet** (Windows/macOS may warn on first run — that's
+a separate thing from the below, blocked on paid Azure/Apple developer accounts).
+What every release *does* have: a **dual-signed `checksums.txt`** — verify what
+you downloaded against it before you trust it.
 
 ```bash
-# Every release includes a SHA256SUMS.txt alongside the binaries
-curl -LO https://github.com/RichieTH/thorn/releases/latest/download/SHA256SUMS.txt
-sha256sum -c SHA256SUMS.txt --ignore-missing   # Linux/macOS
-# or on Windows (PowerShell):
-#   Get-FileHash thorn-rs-x86_64-pc-windows-msvc.zip -Algorithm SHA256
-#   ...then compare by hand against the matching line in SHA256SUMS.txt
+curl -LO https://github.com/RichieTH/thorn/releases/latest/download/checksums.txt
+curl -LO https://github.com/RichieTH/thorn/releases/latest/download/checksums.txt.asc
+curl -LO https://github.com/RichieTH/thorn/releases/latest/download/checksums.txt.dilithium
+
+# Classical signature (GPG) -- needs the publishing key imported once:
+curl -LO https://github.com/RichieTH/thorn/raw/main/docs/thorn-release-signing-pubkey.asc
+gpg --import thorn-release-signing-pubkey.asc
+gpg --verify checksums.txt.asc checksums.txt
+
+# Post-quantum signature (ML-DSA-65) -- verified natively by thorn itself,
+# no extra tooling needed. Works even on the very binary you just downloaded:
+thorn verify-release thorn-rs-x86_64-unknown-linux-gnu.tar.gz \
+  --checksums checksums.txt --signature checksums.txt.dilithium
 ```
+
+Both signatures cover the same `checksums.txt`, which lists the SHA-256 of every
+release artifact -- so either one alone confirms the file you downloaded matches
+what was actually published, not just that the bytes didn't get corrupted in
+transit. See [docs/architecture.md](docs/architecture.md) ("Dual-signed release
+checksums" section) for why it's signed twice (short version: GPG is what most people already have
+installed; ML-DSA is post-quantum and verified by thorn itself with no extra
+tooling, but almost nothing else can check it yet).
 
 ### Go
 ```bash

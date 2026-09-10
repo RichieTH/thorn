@@ -37,6 +37,24 @@ cargo clippy --all-targets -- -D warnings   # must be clean, including test code
 cargo fmt -- --check         # must be clean (cargo fmt to fix)
 ```
 
+**`cargo build --release` may fail with `can't find crate for
+curve25519_dalek_derive`** plus cascading `unresolved import
+crate::backend::vector::ifma` errors -- hit while release-building on Windows
+locally. Root cause is most likely this machine's Smart App Control blocking
+`curve25519-dalek-derive` (a proc-macro crate, pulled in transitively via
+`ed25519-dalek`) from loading its freshly-compiled binary -- the same pattern
+documented above for test/build-script binaries, not a confirmed real bug in
+curve25519-dalek itself (`cargo build` in debug mode never hit this). Both
+`ci.yml` and `release.yml` set `RUSTFLAGS: --cfg
+curve25519_dalek_backend="serial"` at the job level regardless, since it avoids
+the proc-macro dependency entirely at no real cost (Ed25519 verification is a
+rare, non-hot-path check) -- kept as a free simplification even though CI
+itself was never actually confirmed to hit this failure. If you hit it
+locally, set the same env var:
+```bash
+RUSTFLAGS='--cfg curve25519_dalek_backend="serial"' cargo build --release
+```
+
 `cargo test` runs two suites:
 - Unit tests live in `#[cfg(test)] mod tests` blocks **inside** each rule file
   (e.g. `thorn-rs/src/rules/secrets.rs`), not in separate files.
@@ -99,6 +117,47 @@ actually checks signatures rather than just parsing shape. The CLI-level
 integration tests (`main_test.go`, `tests/integration.rs`) cover the "no key" /
 "invalid key" paths only, for the same reason — they can't mint a key the real
 binary would accept.
+
+## Testing release-checksum signature verification
+
+Same discipline as above, for the ML-DSA-65 (`verify_release.rs` /
+`releaseverify.go`) and GPG signing used on every release's `checksums.txt`.
+Unit tests generate a throwaway test ML-DSA keypair per test run
+(`SigningKey::<MlDsa65>::generate()` / `mldsa65.GenerateKey(rand.Reader)`) and
+sign/verify against *that* key explicitly — never the real embedded public key
+— so the real private key (`thorn-private-notes/thorn-dilithium-signing-key.txt`
+and `thorn-gpg-signing-key-private.asc`, if you have access to that directory)
+never needs to touch test code, CI, or this repo at all.
+
+If you need to manually verify a real signed release end-to-end (e.g. after
+changing anything in this path), the actual sequence used during development,
+in order:
+
+```bash
+# 1. Generate a real checksums.txt for some test files
+sha256sum some-file > checksums.txt
+
+# 2. Sign it with the real Dilithium key (from thorn-private-notes/)
+THORN_DILITHIUM_PRIVATE_KEY=<the seed hex> \
+  cargo run --quiet --example sign_checksums --manifest-path thorn-rs/Cargo.toml \
+  < checksums.txt > checksums.txt.dilithium
+
+# 3. Sign it with the real GPG key
+gpg --local-user releases@thorn.dev --detach-sign --armor \
+  -o checksums.txt.asc checksums.txt
+
+# 4. Verify with either implementation -- both should accept it, and each
+#    other's signatures too, since ML-DSA-65 is a standard both `ml-dsa` (Rust)
+#    and `circl` (Go) implement identically
+./thorn-rs/target/debug/thorn verify-release some-file \
+  --checksums checksums.txt --signature checksums.txt.dilithium
+gpg --verify checksums.txt.asc checksums.txt
+```
+
+This exact sequence (including cross-language: sign with one implementation,
+verify with the other) was run manually during development and confirmed
+working before any of this shipped — see the "Verification" section of the
+signing feature's plan for the full record.
 
 ## Benchmark / cross-implementation check
 
